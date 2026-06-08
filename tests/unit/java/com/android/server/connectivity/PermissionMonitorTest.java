@@ -1016,6 +1016,32 @@ public class PermissionMonitorTest {
     }
 
     @Test
+    public void testVpnAppUidIsFilteredFromVpnUidRanges() throws Exception {
+        final String ifName = "tun0";
+        doReturn(List.of(
+                buildPackageInfo(MOCK_PACKAGE1, MOCK_UID11),
+                buildPackageInfo(SYSTEM_PACKAGE2, VPN_UID)))
+                .when(mPackageManager).getInstalledPackagesAsUser(eq(GET_PERMISSIONS), anyInt());
+        startMonitoring();
+
+        // VPN range includes the VPN app UID itself.
+        final Set<UidRange> vpnRange = Set.of(UidRange.createForUser(MOCK_USER1));
+
+        // When VPN is connected, expect a rule to be set up for MOCK_UID11 but NOT for VPN_UID.
+        mPermissionMonitor.onVpnUidRangesAdded(ifName, vpnRange, VPN_UID);
+        verify(mBpfNetMaps).addUidInterfaceRules(eq(ifName), aryEq(new int[]{MOCK_UID11}));
+        verify(mBpfNetMaps, never()).addUidInterfaceRules(eq(ifName), aryEq(new int[]{VPN_UID}));
+
+        // When the VPN app package is uninstalled and reinstalled, expect NO BPF rules to be
+        // added or removed for it because it's a bypassing UID.
+        onPackageRemoved(SYSTEM_PACKAGE2, VPN_UID);
+        verify(mBpfNetMaps, never()).removeUidInterfaceRules(any());
+
+        onPackageAdded(SYSTEM_PACKAGE2, VPN_UID);
+        verify(mBpfNetMaps, never()).addUidInterfaceRules(eq(ifName), aryEq(new int[]{VPN_UID}));
+    }
+
+    @Test
     @EnableCompatChanges(RESTRICT_LOCAL_NETWORK)
     public void testLockdownUidFilteringWithLockdownEnableDisable() {
         doReturn(List.of(
